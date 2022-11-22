@@ -1,0 +1,215 @@
+% 작업공간 정리
+clc;    
+close all; 
+imtool close all;  
+clear;  
+workspace;  
+format long g;
+format compact;
+fontSize = 20; %플롯 타이틀의 폰트 사이즈
+
+
+% 영상 불러오기
+folder = pwd;
+baseFileName = 'clip1.mp4';
+fullFileName = fullfile(folder, baseFileName);
+
+% 영상 로드가 실패할 경우 에러 메세지 출력
+if ~exist(fullFileName, 'file')
+	fullFileNameOnSearchPath = baseFileName;
+	if ~exist(fullFileNameOnSearchPath, 'file')
+		errorMessage = sprintf('에러: %s 원본 동영상 파일이 존재하지 않음.', fullFileName);
+		uiwait(warndlg(errorMessage));
+		return;
+	end
+end
+
+% 영상 로드 시작
+videoObject = VideoReader(fullFileName);
+
+% 영상의 총 프레임 수
+numberOfFrames = videoObject.NumberOfFrame;
+
+% 기준으로 잡은 주황색의 HSV 범위 설정
+% https://cvexplained.wordpress.com/2020/04/28/color-detection-hsv/
+% H : 색, S : 탁함 정도, V : 밝기 정도
+hThresholds = [10, 25] / 255; % 0~1 사이 값을 만들어 줘야함. 대략 0.04 ~ 0.1
+sThresholds = [225, 255] / 255 ; % 255; % 0~1 사이 값을 만들어 줘야함. 대략 0.9~1.0
+vThresholds = [110, 255]; % 0~1 사이 값이 아님!
+
+% 모든 프레임 반복 반복
+for k = 1 : numberOfFrames	
+	
+    % 현재 프레임(원본)
+	thisFrame=read(videoObject,k);
+
+    % 3x4 서브 플롯 중에서 1번째에 위치
+	subplot(3, 4, 1);
+	imshow(thisFrame); % 현재 프레임(원본)
+	axis on;
+
+    %서브 플롯 제목
+	caption = sprintf('원본 %d/%d', k, numberOfFrames); %현재 프레임 / 총 프레임
+	title(caption, 'FontSize', fontSize);
+	drawnow;
+	
+    % 현재 프레임의 각각의 rgb값을 각각의 배열로
+    r_value =thisFrame(:,:,1);
+    g_value =thisFrame(:,:,2);
+    b_value =thisFrame(:,:,3);
+
+
+    % 현재 프레임을 hsv 색상 형식으로 변형
+    hsv = rgb2hsv(double(thisFrame));
+
+    % h, s, v 값을 각각의 배열로
+	hue=hsv(:,:,1);
+	sat=hsv(:,:,2);
+	val=hsv(:,:,3);
+
+    % h, s, v 그래프를 각각 서브 플롯에 위치
+    figure(1)
+    % H
+	subplot(3, 4, 2);
+	imshow(hue, []);
+	impixelinfo();
+	axis on;
+	title('H 추출', 'FontSize', fontSize);
+
+    % S
+	subplot(3, 4, 3);
+	imshow(sat, []);
+	axis on;
+	title('S 추출', 'FontSize', fontSize);
+    
+    % V
+	subplot(3, 4, 4);
+	imshow(val, []);
+	axis on;
+	title('V 추출', 'FontSize', fontSize);
+    
+    % 전체 화면으로 고정 및 윈도우 이름 지정
+        if k == 1
+		% 윈도우 설정
+		set(gcf, 'Units', 'Normalized', 'OuterPosition', [0 0 1 1]);
+		% 윈도우 이름
+		set(gcf, 'Name', '물고기 인식', 'NumberTitle', 'Off') 
+
+        % 체크 박스 생성
+		hCheckbox = uicontrol('Style','checkbox',... 
+			'Units', 'Normalized',...
+			'String', '종료',... 
+			'Value',0,'Position', [.2 .96 .4 .05], ...
+			'FontSize', 14);
+        end
+
+    % H 분포도 그리기
+	[pixelCount, grayLevels] = imhist(hue);
+	subplot(3, 4, 6);
+	bar(grayLevels, pixelCount);
+	grid on;
+	title('H Imhist', 'FontSize', fontSize);
+	xlim([0 grayLevels(end)]); 
+
+    % S 분포도 그리기
+    [pixelCount, grayLevels] = imhist(sat);
+	subplot(3, 4, 7);
+	bar(grayLevels, pixelCount);
+	grid on;
+	title('S Imhist', 'FontSize', fontSize);
+	xlim([0 grayLevels(end)]); 
+
+    % V 분포도 그리기
+    [pixelCount, grayLevels] = imhist(uint8(val));
+	subplot(3, 4, 8);
+	bar(grayLevels, pixelCount);
+	grid on;
+	title('V Imhist', 'FontSize', fontSize);
+	xlim([0 grayLevels(end)]); % Scale x axis manually.
+	
+    % h, s, v 별로 기준을 만족하는 픽셀 찾기
+	binaryH = hue >= hThresholds(1) & hue <= hThresholds(2);
+	binaryS = sat >= sThresholds(1) & sat <= sThresholds(2);
+	binaryV = val >= vThresholds(1) & val <= vThresholds(2);
+	subplot(3, 4, 10);
+	imshow(binaryH, []);
+	axis on;
+	title('H 만족', 'FontSize', fontSize);
+	subplot(3, 4, 11);
+	imshow(binaryS, []);
+	axis on;
+	title('S 만족', 'FontSize', fontSize);
+	subplot(3, 4, 12);
+	imshow(binaryV, []);
+	axis on;
+	title('V 만족', 'FontSize', fontSize);
+	
+	% h, s, v 기준을 모두 만족하는 픽셀 찾기
+	coloredMask = binaryH & binaryS & binaryV;
+    coloredMask = medfilt2(coloredMask);
+
+	% 위에서 만족하는 픽셀이 400개 이상 있어야
+    % 하나의 픽셀 덩어리(blob) 라고 인식
+	coloredMask = bwareaopen(coloredMask, 400);
+
+    % blob 그리기
+	coloredMask = imfill(coloredMask, 'holes');
+	subplot(3, 4, 9);
+	imshow(coloredMask, []);
+	axis on;
+	title('모두 만족', 'FontSize', fontSize);
+	drawnow;
+	
+    %coloredMask 값 중에서 true 인 
+	[labeledImage, numberOfRegions] = bwlabel(coloredMask);
+	if numberOfRegions >= 1
+        % 박스의 중앙 값 구하기
+		stats = regionprops(labeledImage, 'BoundingBox', 'Centroid');
+		if exist('hRect', 'var')
+			delete(hRect);
+		end
+		if exist('hText', 'var')
+			delete(hText);
+		end
+		
+		% 서브플롯에 표시
+		subplot(3, 4, 5); 
+		% hImage=subplot(3, 4, 5);
+		imshow(thisFrame);
+		axis on;
+		hold on; % 이걸 해줘야 모든 박스를 표시할 수 있음
+		caption = sprintf('%d개 찾음. %d/%d', numberOfRegions, k, numberOfFrames);
+		title(caption, 'FontSize', fontSize);
+		drawnow;
+		
+		% 구해진 모든 박스를 서브플롯에 표시
+		for r = 1 : numberOfRegions
+			thisBB = stats(r).BoundingBox; % 박스 정보
+			thisCentroid = stats(r).Centroid; % 박스 중심 정보
+			hRect(r) = rectangle('Position', thisBB, 'EdgeColor', 'r', 'LineWidth', 2);
+			hSpot = plot(thisCentroid(1), thisCentroid(2), 'y+', 'MarkerSize', 10, 'LineWidth', 2)
+            
+            % 박스의 20칸 위에 박스의 위치 정보를 텍스트로 출력
+            % 플롯 공간의 부족으로 인해 주석 처리
+			% hText(r) = text(thisBB(1), thisBB(2)-20, strcat('X: ', num2str(round(thisCentroid(1))), '    Y: ', num2str(round(thisCentroid(2)))));
+			% set(hText(r), 'FontName', 'Arial', 'FontWeight', 'bold', 'FontSize', 12, 'Color', 'yellow');
+		end
+		hold off % 박스 표시 끝
+		drawnow;
+	end
+
+	% 체크 박스 이벤트
+	if get(hCheckbox, 'Value')
+		% 체크박스가 클릭됐을 경우
+		msgbox('사용자에 의해 종료됨.');
+		return;
+	end
+end
+
+msgbox('영상 끝');
+
+%% RGB, HSV Color Reference 
+% https://cvexplained.wordpress.com/2020/04/28/color-detection-hsv/
+% https://discover.hubpages.com/technology/Color-spaces-RGB-vs-HSV-Which-one-to-use
+
+
